@@ -122,11 +122,13 @@ def fetch_one_page(session: requests.Session, headers: dict,
 
 def fetch_museum_articles(session: requests.Session, headers: dict,
                           biz: str, token: dict, museum_name: str,
-                          existing_pages: int = 0) -> tuple[list, str | None]:
+                          existing_pages: int = 0,
+                          max_pages: int = 0) -> tuple[list, str | None]:
     """
     获取一个博物馆的全部文章列表
     返回 (articles, error)
     existing_pages: 断点续传 - 已完成的页数
+    max_pages: 最多获取几页，0 表示不限制（获取全部）
     """
     all_articles = []
     page = existing_pages
@@ -166,6 +168,10 @@ def fetch_museum_articles(session: requests.Session, headers: dict,
 
         if not result["has_next"]:
             print(f"  已到最后一页")
+            break
+
+        if max_pages > 0 and (page - existing_pages + 1) >= max_pages:
+            print(f"  已达到最大页数限制 ({max_pages} 页)，停止")
             break
 
         page += 1
@@ -223,6 +229,7 @@ def main():
     parser.add_argument("--museums", default="scripts/museums.json", help="博物馆列表文件")
     parser.add_argument("--resume", action="store_true", help="从断点继续")
     parser.add_argument("--only", default="", help="只跑指定博物馆，逗号分隔")
+    parser.add_argument("--max-pages", type=int, default=0, help="每个博物馆最多获取几页，0=全部（默认）。测试时可设为1")
     args = parser.parse_args()
 
     # 解析 token
@@ -280,7 +287,8 @@ def main():
 
         # 获取文章
         articles, error = fetch_museum_articles(
-            session, headers, biz, token, name, existing_pages
+            session, headers, biz, token, name, existing_pages,
+            max_pages=args.max_pages
         )
 
         if articles:
