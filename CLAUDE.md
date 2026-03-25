@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **⚠️ IMPORTANT: This is a DEVELOPMENT-ONLY server. DO NOT run tests, start services, or deploy here. Code editing only.**
+
+> **⚠️ 重要：修改完代码之后，自动commit相关修改的代码，然后 push**
+
+> **⚠️ 重要：git commit 时不要添加 Co-Authored-By 行**
+
 ## Project Overview
 
 WeChat public account (公众号) article scraper for academic research. Extracts article content, metadata, and engagement metrics (views, likes, shares, comments). Licensed CC BY-NC-SA 4.0 (non-commercial only).
