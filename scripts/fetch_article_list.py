@@ -1,22 +1,35 @@
 """
-阶段2：复用一次 token，批量获取多个博物馆公众号的历史文章 URL 列表
+阶段2：批量获取多个博物馆公众号的历史文章 URL 列表
+
+每个博物馆需要各自的 token URL（session 绑定到特定公众号）。
+支持两种方式传入 token：
+  1. --token 单个 URL（只能处理该 URL 对应的博物馆）
+  2. --token-file 文件（每行一个 token URL，批量处理多个博物馆）
 
 输入：
     - museums.json（阶段1的输出，包含 biz）
-    - 一次 Charles 抓取的 token URL
+    - token URL（从 Charles 抓取）
 
 输出：
     - data/articles/{museum_name}.json（每个博物馆的文章列表）
     - data/progress.json（断点续传进度文件）
 
 用法：
-    uv run python scripts/fetch_article_list.py --token "https://mp.weixin.qq.com/mp/profile_ext?action=home&__biz=xxx&uin=xxx&key=xxx&pass_ticket=xxx"
+    # 单个博物馆
+    python scripts/fetch_article_list.py --token "https://mp.weixin.qq.com/mp/profile_ext?..."
 
-    # 从断点继续（token 过期后重新抓一个）
-    uv run python scripts/fetch_article_list.py --token "新的token_url" --resume
+    # 批量（先准备 token 文件）
+    python scripts/fetch_article_list.py --token-file scripts/tokens.txt
 
-    # 只跑指定博物馆
-    uv run python scripts/fetch_article_list.py --token "..." --only "国家博物馆,故宫博物院"
+    # 测试模式：每个博物馆只爬1页
+    python scripts/fetch_article_list.py --token-file scripts/tokens.txt --max-pages 1
+
+    # 从断点继续
+    python scripts/fetch_article_list.py --token-file scripts/tokens.txt --resume
+
+token 文件格式（tokens.txt）：
+    在 Charles 中依次打开多个博物馆主页后，每行粘贴一个完整 URL。
+    脚本会自动根据 URL 中的 __biz 匹配到对应的博物馆。
 
 说明：
     此脚本调用微信私有 API，需要 token，存在封禁风险。
@@ -28,6 +41,7 @@ import argparse
 import json
 import os
 import random
+import sys
 import time
 from urllib import parse
 from pathlib import Path
@@ -43,19 +57,34 @@ PROGRESS_FILE = Path("data/progress.json")
 
 
 def parse_token(token_url: str) -> dict | None:
-    """从 token URL 中提取认证参数"""
+    """从 token URL 中提取认证参数（包括 __biz）"""
     parsed = parse.urlparse(token_url)
     params = parse.parse_qs(parsed.query)
-    required = ["uin", "key", "pass_ticket"]
+    required = ["__biz", "uin", "key", "pass_ticket"]
     result = {}
     for key in required:
         val = params.get(key)
         if not val:
-            print(f"❌ token 缺少参数: {key}")
+            print(f"  ⚠️ token 缺少参数: {key}")
             return None
         result[key] = val[0]
-    # __biz 不需要，我们会用 museums.json 里的
     return result
+
+
+def load_tokens_from_file(filepath: str) -> list[dict]:
+    """从文件加载多个 token，每行一个 URL"""
+    tokens = []
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line_no, line in enumerate(f, 1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            token = parse_token(line)
+            if token:
+                tokens.append(token)
+            else:
+                print(f"  第 {line_no} 行解析失败，跳过")
+    return tokens
 
 
 def fetch_one_page(session: requests.Session, headers: dict,
@@ -77,8 +106,8 @@ def fetch_one_page(session: requests.Session, headers: dict,
     if "app_msg_ext_info" not in text:
         if '"home_page_list":[]' in text:
             return {"articles": [], "has_next": False, "error": "被限流/封禁"}
-        if "invalid session" in text.lower() or "请重新登录" in text:
-            return {"articles": [], "has_next": False, "error": "token已过期"}
+        if "no session" in text.lower() or "invalid session" in text.lower():
+            return {"articles": [], "has_next": False, "error": "token已过期或不匹配"}
         return {"articles": [], "has_next": False, "error": f"未知响应: {text[:200]}"}
 
     try:
@@ -132,7 +161,6 @@ def fetch_museum_articles(session: requests.Session, headers: dict,
     """
     all_articles = []
     page = existing_pages
-    max_retries = 2
 
     while True:
         offset = page * 10
@@ -151,7 +179,7 @@ def fetch_museum_articles(session: requests.Session, headers: dict,
                     return all_articles, result["error"]
 
             elif "token已过期" in result["error"]:
-                print(f"  ❌ token 已过期，请重新抓取 token 后使用 --resume 继续")
+                print(f"  ❌ token 已过期或与该博物馆不匹配")
                 return all_articles, "token_expired"
 
             else:
@@ -225,18 +253,15 @@ def save_articles(museum_name: str, articles: list):
 
 def main():
     parser = argparse.ArgumentParser(description="批量获取博物馆公众号文章列表")
-    parser.add_argument("--token", required=True, help="Charles 抓取的完整 token URL")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--token", help="单个 token URL（处理该 URL 对应的博物馆）")
+    group.add_argument("--token-file", help="token 文件路径（每行一个 URL，批量处理）")
     parser.add_argument("--museums", default="scripts/museums.json", help="博物馆列表文件")
     parser.add_argument("--resume", action="store_true", help="从断点继续")
     parser.add_argument("--only", default="", help="只跑指定博物馆，逗号分隔")
-    parser.add_argument("--max-pages", type=int, default=0, help="每个博物馆最多获取几页，0=全部（默认）。测试时可设为1")
+    parser.add_argument("--max-pages", type=int, default=0,
+                        help="每个博物馆最多获取几页，0=全部（默认）。测试时可设为1")
     args = parser.parse_args()
-
-    # 解析 token
-    token = parse_token(args.token)
-    if not token:
-        print("token 解析失败，请检查格式")
-        sys.exit(1)
 
     # 读取博物馆列表
     with open(args.museums, "r", encoding="utf-8") as f:
@@ -248,10 +273,52 @@ def main():
         print("没有可用的博物馆（缺少 biz），请先运行 collect_biz.py")
         sys.exit(1)
 
-    # 只跑指定博物馆
+    # 构建 biz → museum 映射
+    biz_to_museum = {m["biz"]: m for m in museums}
+
+    # 解析 token(s)，构建 biz → token 映射
+    biz_to_token = {}
+    if args.token:
+        token = parse_token(args.token)
+        if not token:
+            print("token 解析失败，请检查格式")
+            sys.exit(1)
+        biz_to_token[token["__biz"]] = token
+    else:
+        tokens = load_tokens_from_file(args.token_file)
+        if not tokens:
+            print("未从文件中解析到有效 token")
+            sys.exit(1)
+        for t in tokens:
+            biz_to_token[t["__biz"]] = t
+        print(f"从文件加载了 {len(tokens)} 个 token\n")
+
+    # 确定要处理的博物馆：只处理有对应 token 的
     if args.only:
         only_names = set(args.only.split(","))
         museums = [m for m in museums if m["name"] in only_names]
+
+    museums_with_token = []
+    museums_without_token = []
+    for m in museums:
+        if m["biz"] in biz_to_token:
+            museums_with_token.append(m)
+        else:
+            museums_without_token.append(m)
+
+    if museums_without_token:
+        print(f"以下博物馆没有对应的 token，将跳过:")
+        for m in museums_without_token:
+            print(f"  - {m['name']}")
+        print()
+
+    if not museums_with_token:
+        print("没有博物馆与提供的 token 匹配。")
+        print("请确认 token URL 中的 __biz 与 museums.json 中的 biz 一致。")
+        print("\nmuseums.json 中的 biz 值:")
+        for m in museums:
+            print(f"  {m['name']}: {m['biz']}")
+        sys.exit(1)
 
     # 加载进度
     progress = load_progress() if args.resume else {"completed": [], "in_progress": None, "pages_done": 0}
@@ -259,14 +326,15 @@ def main():
     session = requests.Session()
     headers = {"User-Agent": UserAgent().chrome}
 
-    total = len(museums)
+    total = len(museums_with_token)
     completed_names = set(progress["completed"])
 
-    print(f"共 {total} 个博物馆，已完成 {len(completed_names)} 个\n")
+    print(f"共 {total} 个博物馆有 token，已完成 {len(completed_names & {m['name'] for m in museums_with_token})} 个\n")
 
-    for i, museum in enumerate(museums):
+    for i, museum in enumerate(museums_with_token):
         name = museum["name"]
         biz = museum["biz"]
+        token = biz_to_token[biz]
 
         if name in completed_names:
             print(f"[{i+1}/{total}] {name} — 已完成，跳过")
@@ -296,10 +364,9 @@ def main():
             print(f"  ✅ 保存 {count} 篇文章 → data/articles/{name}.json")
 
         if error == "token_expired":
-            # token 过期，保存进度后退出
             save_progress(progress)
             print(f"\n⚠️ token 已过期。请重新抓取 token 后运行:")
-            print(f'  uv run python scripts/fetch_article_list.py --token "新token" --resume')
+            print(f'  python scripts/fetch_article_list.py --token-file scripts/tokens.txt --resume')
             sys.exit(1)
 
         if error and "限流" not in error:
@@ -317,7 +384,7 @@ def main():
             print(f"  下一个博物馆前等待 {delay:.0f} 秒...\n")
             time.sleep(delay)
 
-    print(f"\n🎉 全部完成！文章列表保存在 data/articles/ 目录")
+    print(f"\n完成！文章列表保存在 data/articles/ 目录")
 
     # 统计
     total_articles = 0
@@ -328,5 +395,4 @@ def main():
 
 
 if __name__ == "__main__":
-    import sys
     main()
