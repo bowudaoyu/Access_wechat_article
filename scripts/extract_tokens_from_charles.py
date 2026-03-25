@@ -31,7 +31,7 @@ def extract_tokens_from_csv(filepath: str) -> list[str]:
             for row in reader:
                 # Charles CSV 常见字段名: URL, Path, Host
                 url = row.get("URL") or row.get("url") or row.get("Url") or ""
-                if "profile_ext" in url and "pass_ticket" in url:
+                if "profile_ext?action=home" in url and "pass_ticket" in url:
                     urls.append(url)
     except Exception:
         # 不是标准 CSV，尝试当作纯文本
@@ -49,12 +49,12 @@ def extract_tokens_from_text(filepath: str) -> list[str]:
                 continue
             # 匹配任何包含 mp.weixin.qq.com 和 pass_ticket 的 URL
             matches = re.findall(
-                r'https?://mp\.weixin\.qq\.com/mp/profile_ext\?[^\s"\'<>]+pass_ticket=[^\s"\'<>]+',
+                r'https?://mp\.weixin\.qq\.com/mp/profile_ext\?action=home[^\s"\'<>]+pass_ticket=[^\s"\'<>]+',
                 line
             )
             urls.extend(matches)
             # 如果整行本身就是 URL
-            if not matches and "profile_ext" in line and "pass_ticket" in line:
+            if not matches and "profile_ext?action=home" in line and "pass_ticket" in line:
                 if line.startswith("http"):
                     urls.append(line)
     return urls
@@ -100,7 +100,7 @@ def main():
 
     if not urls:
         print("未找到有效的 token URL。")
-        print("请确认文件中包含 mp.weixin.qq.com/mp/profile_ext 的请求，且带有 pass_ticket 参数。")
+        print("请确认文件中包含 mp.weixin.qq.com/mp/profile_ext?action=home 的请求，且带有 pass_ticket 参数。")
         sys.exit(1)
 
     print(f"找到 {len(urls)} 条 profile_ext 请求")
