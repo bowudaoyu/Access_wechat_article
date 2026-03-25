@@ -61,7 +61,13 @@ def extract_biz_from_url(article_url: str, session: requests.Session, headers: d
                 nickname = el.get_text().strip()
                 break
 
-        return {"biz": biz, "nickname": nickname}
+        # 生成公众号主页链接
+        home_url = (
+            "https://mp.weixin.qq.com/mp/profile_ext?action=home&__biz="
+            + biz + "&scene=124#wechat_redirect"
+        )
+
+        return {"biz": biz, "nickname": nickname, "home_url": home_url}
 
     except Exception as e:
         print(f"  请求异常: {e}")
@@ -112,8 +118,10 @@ def main():
                 "article_url": url,
                 "biz": info["biz"],
                 "nickname": info["nickname"] or name,
+                "home_url": info["home_url"],
             }
             print(f"  biz={info['biz']}, nickname={info['nickname']}")
+            print(f"  主页: {info['home_url']}")
         else:
             result = {
                 "name": name,
