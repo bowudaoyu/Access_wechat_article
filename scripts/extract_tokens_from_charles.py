@@ -1,16 +1,14 @@
 """
-从 Charles Proxy 导出文件中自动提取所有微信 token URL
+从 Charles Proxy 导出的 URL 列表中自动提取所有微信 token URL
 
 使用方法：
     1. 开启 Charles，清空记录
     2. 在微信中快速依次点开多个博物馆公众号主页（只需点开，不用等加载）
-    3. Charles 菜单 → File → Save Session As... → 保存为 .csv 文件
-       或者 File → Export Session... → 选择 CSV 格式
-    4. 运行此脚本：
-       python scripts/extract_tokens_from_charles.py charles_export.csv
-
-    也支持直接从 Charles 复制多行文本（选中多个请求 → 右键 → Copy → Copy URLs）：
-       python scripts/extract_tokens_from_charles.py urls.txt
+    3. 在 Charles 左侧展开 mp.weixin.qq.com，选中所有请求（Cmd+A）
+       右键 → Copy → Copy URL(s)
+    4. 粘贴到文本文件（如 scripts/raw_urls.txt）并保存
+    5. 运行：
+       python scripts/extract_tokens_from_charles.py scripts/raw_urls.txt
 
 输出：scripts/tokens.txt（可直接用于 fetch_article_list.py --token-file）
 """
